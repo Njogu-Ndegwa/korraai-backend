@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -79,14 +79,27 @@ WSGI_APPLICATION = 'korraai.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': 'koraai',
+#         'USER': 'postgres',
+#         'PASSWORD': '12345678',
+#         'HOST': 'localhost',  # or your database host
+#         'PORT': '5432',       # default PostgreSQL port
+#     }
+# }
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'koraai',
-        'USER': 'postgres',
-        'PASSWORD': '12345678',
-        'HOST': 'localhost',  # or your database host
-        'PORT': '5432',       # default PostgreSQL port
+        'NAME': os.getenv('DB_NAME', 'django_crm_db'),
+        'USER': os.getenv('DB_USER', 'django_user'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'django_secure_password_2024'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5433'),
+        'OPTIONS': {
+            'options': '-c default_transaction_isolation=serializable'
+        },
     }
 }
 
