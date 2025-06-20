@@ -10,26 +10,19 @@ from platforms.models import SocialPlatform, TenantPlatformAccount
 from .serializers import (
     AISettingsListSerializer, AISettingsDetailSerializer,
     AISettingsUpdateSerializer, AISettingsTestSerializer,
-    PlatformAISettingsSerializer
+    PlatformAISettingsSerializer, IntentCategoryListSerializer, IntentCategoryDetailSerializer,
+    IntentCategoryCreateUpdateSerializer, IntentAnalyticsSerializer,
+    IntentAutoActionsSerializer, AISettingsCreateSerializer, AISettingsResponseSerializer
 )
+from django.db.models import Count, Avg, Q
+from datetime import timedelta, date
+from .models import AIIntentCategory
+from conversations.models import Message, Conversation
+from tenants.models import Tenant
 import json
 import random
 import time
-# views.py
-from rest_framework import status
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
-from django.db import transaction
-from django.utils import timezone
-from django.db.models import Count, Avg, Q
-from datetime import timedelta, date
-from .models import AIIntentCategory, Message, Conversation, TenantUser
-from .serializers import (
-    IntentCategoryListSerializer, IntentCategoryDetailSerializer,
-    IntentCategoryCreateUpdateSerializer, IntentAnalyticsSerializer,
-    IntentAutoActionsSerializer
-)
+
 
 
 
@@ -811,3 +804,218 @@ def _validate_auto_action_references(auto_actions, tenant_id):
                     errors.append(f"Contact category with ID {category_id} not found.")
     
     return errors
+
+
+
+
+@api_view(['POST'])
+def ai_settings_create(request, platform_id):
+    """
+    POST /api/ai/settings/platform/{platform_id} - Create AI settings for a specific platform
+    """
+    tenant_id = getattr(request, 'tenant_id', None)
+    
+    if not platform_id:
+        return Response(
+            {'error': 'Platform ID is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validate platform exists and user has access
+    try:
+        from .models import SocialPlatform, TenantPlatformAccount
+        
+        # Check if platform exists
+        platform = get_object_or_404(SocialPlatform, id=platform_id, is_active=True)
+        
+        # Check if tenant has access to this platform (has connected account)
+        tenant_platform_account = TenantPlatformAccount.objects.filter(
+            tenant_id=tenant_id,
+            platform_id=platform_id,
+            connection_status='active'
+        ).first()
+        
+        if not tenant_platform_account:
+            return Response(
+                {
+                    'error': 'Platform not connected to your account. Please connect the platform first.',
+                    'platform_name': platform.display_name
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+    except Exception as e:
+        return Response(
+            {'error': 'Invalid platform ID'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Check if AI settings already exist for this tenant-platform combination
+    existing_settings = TenantAISettings.objects.filter(
+        tenant_id=tenant_id,
+        platform_id=platform_id
+    ).first()
+    
+    if existing_settings:
+        return Response(
+            {
+                'error': 'AI settings already exist for this platform',
+                'message': f'Use PUT /api/ai/settings/platform/{platform_id} to update existing settings',
+                'existing_settings_id': str(existing_settings.id)
+            },
+            status=status.HTTP_409_CONFLICT
+        )
+    
+    # Prepare data with platform_id from URL
+    data = request.data.copy()
+    data['platform_id'] = platform_id
+    
+    # Create the AI settings
+    serializer = AISettingsCreateSerializer(data=data, context={'request': request})
+    
+    if serializer.is_valid():
+        try:
+            with transaction.atomic():
+                # Add tenant_id to validated data
+                validated_data = serializer.validated_data
+                validated_data['tenant_id'] = tenant_id
+                
+                ai_settings = TenantAISettings.objects.create(**validated_data)
+            
+            # Return detailed response with created settings
+            response_serializer = AISettingsResponseSerializer(ai_settings)
+            
+            return Response(
+                {
+                    'message': f'AI settings created successfully for {platform.display_name}',
+                    'data': response_serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+            
+        except IntegrityError as e:
+            return Response(
+                {
+                    'error': 'Failed to create AI settings due to database constraint',
+                    'details': str(e)
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {
+                    'error': 'Failed to create AI settings',
+                    'details': str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+def ai_settings_bulk_create(request):
+    """
+    POST /api/ai/settings/bulk - Create AI settings for multiple platforms at once
+    """
+    tenant_id = getattr(request, 'tenant_id', None)
+    
+    platforms_data = request.data.get('platforms', [])
+    
+    if not platforms_data or not isinstance(platforms_data, list):
+        return Response(
+            {'error': 'platforms field is required and must be a list'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    created_settings = []
+    errors = []
+    
+    with transaction.atomic():
+        for platform_data in platforms_data:
+            platform_id = platform_data.get('platform_id')
+            
+            if not platform_id:
+                errors.append({
+                    'platform_data': platform_data,
+                    'error': 'platform_id is required'
+                })
+                continue
+            
+            # Check if settings already exist
+            existing = TenantAISettings.objects.filter(
+                tenant_id=tenant_id,
+                platform_id=platform_id
+            ).exists()
+            
+            if existing:
+                errors.append({
+                    'platform_id': platform_id,
+                    'error': 'AI settings already exist for this platform'
+                })
+                continue
+            
+            # Create settings
+            serializer = AISettingsCreateSerializer(
+                data=platform_data,
+                context={'request': request}
+            )
+            
+            if serializer.is_valid():
+                try:
+                    validated_data = serializer.validated_data
+                    validated_data['tenant_id'] = tenant_id
+                    
+                    ai_settings = TenantAISettings.objects.create(**validated_data)
+                    created_settings.append({
+                        'platform_id': platform_id,
+                        'settings_id': str(ai_settings.id)
+                    })
+                except Exception as e:
+                    errors.append({
+                        'platform_id': platform_id,
+                        'error': str(e)
+                    })
+            else:
+                errors.append({
+                    'platform_id': platform_id,
+                    'error': serializer.errors
+                })
+    
+    response_data = {
+        'message': f'Bulk creation completed. {len(created_settings)} settings created.',
+        'created_settings': created_settings,
+        'errors': errors
+    }
+    
+    # Return appropriate status code
+    if created_settings and not errors:
+        return Response(response_data, status=status.HTTP_201_CREATED)
+    elif created_settings and errors:
+        return Response(response_data, status=status.HTTP_207_MULTI_STATUS)
+    else:
+        return Response(response_data, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _get_default_business_hours():
+    """Helper function to generate default business hours"""
+    return {
+        'monday': {'start': '09:00', 'end': '17:00', 'enabled': True},
+        'tuesday': {'start': '09:00', 'end': '17:00', 'enabled': True},
+        'wednesday': {'start': '09:00', 'end': '17:00', 'enabled': True},
+        'thursday': {'start': '09:00', 'end': '17:00', 'enabled': True},
+        'friday': {'start': '09:00', 'end': '17:00', 'enabled': True},
+        'saturday': {'start': '10:00', 'end': '14:00', 'enabled': False},
+        'sunday': {'start': '10:00', 'end': '14:00', 'enabled': False}
+    }
+
+
+def _get_default_handover_triggers():
+    """Helper function to generate default handover triggers"""
+    return {
+        'sentiment_threshold': -0.5,
+        'consecutive_failures': 3,
+        'conversation_duration_minutes': 30,
+        'customer_request_human': True,
+        'escalation_keywords_detected': True
+    }

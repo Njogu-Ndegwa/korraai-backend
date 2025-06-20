@@ -43,7 +43,8 @@ INSTALLED_APPS = [
     'platforms',
     'tenants',
     'analytics',
-    'ai'
+    'ai',
+    'knowledgebase'
 ]
 
 MIDDLEWARE = [
