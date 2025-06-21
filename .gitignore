@@ -8,6 +8,7 @@ __pycache__/
 .Python
 env/
 venv/
+myEnv/
 .venv/
 # pip-env
 Pipfile.lock
