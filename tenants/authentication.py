@@ -1,68 +1,66 @@
 # tenants/authentication.py
-from django.contrib.auth.backends import BaseBackend
 from rest_framework_simplejwt.authentication import JWTAuthentication
-from rest_framework_simplejwt.tokens import UntypedToken
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
-from django.contrib.auth.models import AnonymousUser
-from .models import TenantUser
-import jwt
-from django.conf import settings
-
-
-class TenantUserBackend(BaseBackend):
-    """
-    Custom authentication backend for TenantUser model
-    """
-    def authenticate(self, request, email=None, password=None, **kwargs):
-        try:
-            user = TenantUser.objects.get(email=email, is_active=True)
-            # In production, use proper password hashing
-            if user.password_hash == password:
-                return user
-        except TenantUser.DoesNotExist:
-            return None
-        return None
-
-    def get_user(self, user_id):
-        try:
-            return TenantUser.objects.get(pk=user_id, is_active=True)
-        except TenantUser.DoesNotExist:
-            return None
+from rest_framework.exceptions import AuthenticationFailed
+from django.contrib.auth import get_user_model
 
 
 class TenantJWTAuthentication(JWTAuthentication):
     """
-    Custom JWT authentication for TenantUser
+    Custom JWT authentication with tenant validation
     """
+    
     def get_user(self, validated_token):
         """
-        Attempts to find and return a user using the given validated token.
+        Get user from validated token and perform tenant checks
         """
         try:
             user_id = validated_token['user_id']
         except KeyError:
             raise InvalidToken('Token contained no recognizable user identification')
-
+        
         try:
-            user = TenantUser.objects.get(**{'id': user_id, 'is_active': True})
-        except TenantUser.DoesNotExist:
-            raise InvalidToken('User not found')
-
+            User = get_user_model()
+            user = User.objects.select_related('tenant').get(id=user_id)
+        except User.DoesNotExist:
+            raise AuthenticationFailed('User not found')
+        
+        if not user.is_active:
+            raise AuthenticationFailed('User inactive or deleted')
+        
+        # Check tenant status
+        if user.tenant and user.tenant.status != 'active':
+            raise AuthenticationFailed('Tenant account is suspended')
+        
         return user
 
 
-# Custom user property for request
-class TenantUserMiddleware:
-    """
-    Middleware to set tenant user as request.user
-    """
-    def __init__(self, get_response):
-        self.get_response = get_response
+# Custom JWT Token Classes with tenant info
+from rest_framework_simplejwt.tokens import RefreshToken
 
-    def __call__(self, request):
-        response = self.get_response(request)
-        return response
+class TenantRefreshToken(RefreshToken):
+    """Custom refresh token that includes tenant information"""
+    
+    @classmethod
+    def for_user(cls, user):
+        token = super().for_user(user)
+        
+        # Add custom claims
+        token['tenant_id'] = str(user.tenant.id)
+        token['tenant_name'] = user.tenant.business_name
+        token['user_role'] = user.role
+        token['email'] = user.email
+        
+        return token
 
-    def process_view(self, request, view_func, view_args, view_kwargs):
-        # This will be handled by DRF authentication classes
-        pass
+
+def get_tokens_for_user(user):
+    """
+    Generate access and refresh tokens for a user
+    """
+    refresh = TenantRefreshToken.for_user(user)
+    
+    return {
+        'refresh': str(refresh),
+        'access': str(refresh.access_token),
+    }

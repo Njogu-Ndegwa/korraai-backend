@@ -4,7 +4,8 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
 from django.db import transaction
-from .models import Customer, Conversation
+from .models import Customer
+from conversations.models import Conversation
 from .serializers import (
     CustomerListSerializer, CustomerDetailSerializer,
     CustomerCreateUpdateSerializer, ConversationListSerializer
@@ -13,12 +14,13 @@ from django.db.models import Count, Q, Max, Prefetch, Exists, OuterRef
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import Customer, MessageReadStatus, ContactLabel
-from conversations.models import Conversation, Message
+from .models import Customer, ContactLabel
+from conversations.models import Conversation, Message, MessageReadStatus
 from .serializers import (
     ContactsListResponseSerializer, ContactListSerializer, RecentContactSerializer,
     UnreadContactSerializer, ContactSummarySerializer
 )
+from core.utils import get_tenant_from_user
 
 @api_view(['GET', 'POST'])
 def customer_list_create(request):
@@ -27,7 +29,9 @@ def customer_list_create(request):
     POST /api/customers - Create new customer manually
     """
     # Get tenant from request (assuming you have middleware that sets this)
-    tenant_id = getattr(request, 'tenant_id', None)
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
     
     if request.method == 'GET':
         customers = Customer.objects.filter(
@@ -58,7 +62,9 @@ def customer_detail(request, customer_id):
     PUT /api/customers/{customer_id} - Update customer information
     DELETE /api/customers/{customer_id} - Delete customer record
     """
-    tenant_id = getattr(request, 'tenant_id', None)
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
     
     customer = get_object_or_404(
         Customer.objects.select_related(
@@ -98,7 +104,9 @@ def customer_conversations(request, customer_id):
     """
     GET /api/customers/{customer_id}/conversations - Get customer's conversation history
     """
-    tenant_id = getattr(request, 'tenant_id', None)
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
     
     # Verify customer exists and belongs to tenant
     customer = get_object_or_404(
@@ -124,7 +132,9 @@ def contacts_list(request):
     """
     GET /api/contacts - Get contacts list with latest message preview and unread counts
     """
-    tenant_id = getattr(request, 'tenant_id', None)
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
     current_user_id = getattr(request, 'user_id', None)
     
     # Base queryset with optimizations
@@ -265,7 +275,9 @@ def contacts_recent(request):
     """
     GET /api/contacts/recent - Get recently active contacts (last 24-48 hours)
     """
-    tenant_id = getattr(request, 'tenant_id', None)
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
     current_user_id = getattr(request, 'user_id', None)
     
     # Get timeframe from query params (default 24 hours)
@@ -340,7 +352,9 @@ def contacts_unread(request):
     """
     GET /api/contacts/unread - Get contacts with unread messages only
     """
-    tenant_id = getattr(request, 'tenant_id', None)
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
     current_user_id = getattr(request, 'user_id', None)
     
     if not current_user_id:

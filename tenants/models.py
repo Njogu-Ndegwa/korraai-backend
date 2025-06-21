@@ -1,7 +1,7 @@
 # tenants/models.py
 import uuid
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.contrib.postgres.fields import ArrayField
 
 
@@ -23,25 +23,108 @@ class Tenant(models.Model):
         return self.business_name
 
 
-class TenantUser(models.Model):
+class TenantUserManager(BaseUserManager):
+    """Custom user manager for TenantUser"""
+    
+    def create_user(self, email, tenant, password=None, **extra_fields):
+        """Create and return a regular user"""
+        if not email:
+            raise ValueError('The Email field must be set')
+        if not tenant:
+            raise ValueError('The Tenant field must be set')
+        
+        email = self.normalize_email(email)
+        user = self.model(email=email, tenant=tenant, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        """Create and return a superuser"""
+        # For superuser, create a special system tenant or use existing one
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('role', 'admin')
+        extra_fields.setdefault('first_name', 'Super')
+        extra_fields.setdefault('last_name', 'Admin')
+
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True.')
+
+        # Get or create a system tenant for superuser
+        system_tenant, created = Tenant.objects.get_or_create(
+            business_email='system@admin.com',
+            defaults={
+                'business_name': 'System Administration',
+                'business_phone': '',
+                'subscription_tier': 'unlimited',
+                'encryption_key_hash': str(uuid.uuid4()),
+                'status': 'active'
+            }
+        )
+
+        return self.create_user(email, system_tenant, password, **extra_fields)
+
+
+class TenantUser(AbstractBaseUser):
+    """Custom user model that integrates with Django's auth system"""
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='users')
-    email = models.EmailField()
-    password_hash = models.CharField(max_length=255)
+    email = models.EmailField(unique=True)  # Must be globally unique for Django auth
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
-    role = models.CharField(max_length=50)
-    permissions = models.JSONField(default=dict)
+    role = models.CharField(max_length=50, default='user')
+    permissions = models.JSONField(default=dict)  # Your custom permissions
     is_active = models.BooleanField(default=True)
-    last_login = models.DateTimeField(null=True, blank=True)
+    is_staff = models.BooleanField(default=False)  # Required for Django admin access
+    is_superuser = models.BooleanField(default=False)  # Add this manually
     created_at = models.DateTimeField(auto_now_add=True)
-
+    
+    objects = TenantUserManager()
+    
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = []
+    
     class Meta:
         db_table = 'tenant_users'
-        unique_together = ['tenant', 'email']
-
+    
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.email})"
+    
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}".strip()
+    
+    @property
+    def is_admin(self):
+        return self.role == 'admin'
+    
+    @property
+    def is_tenant_staff(self):
+        """Check if user has staff-level access in their tenant"""
+        return self.role in ['admin', 'manager']
+    
+    def has_perm(self, perm, obj=None):
+        """Required for Django admin - implement your custom logic"""
+        if self.is_superuser:
+            return True
+        # Add your custom permission logic here
+        return self.is_admin
+    
+    def has_module_perms(self, app_label):
+        """Required for Django admin"""
+        if self.is_superuser:
+            return True
+        return self.is_admin
+    
+    def save(self, *args, **kwargs):
+        # Automatically set is_staff for admin users
+        if self.role == 'admin':
+            self.is_staff = True
+        super().save(*args, **kwargs)
 
 
 class SubscriptionPlan(models.Model):
