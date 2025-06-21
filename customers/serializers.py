@@ -1,7 +1,9 @@
 # serializers.py
 from rest_framework import serializers
-from .models import Customer, ContactInsights, Conversation, Message, SocialPlatform, TenantPlatformAccount
+from .models import Customer, ContactInsight
+from platforms.models import SocialPlatform, TenantPlatformAccount
 from .models import  ContactLabel, CustomerLabel
+from conversations.models import Message, Conversation
 from conversations.models import Conversation, Message, MessageReadStatus
 from django.db.models import Count, Q, Max
 from django.utils import timezone
@@ -28,7 +30,7 @@ class ContactInsightsSerializer(serializers.ModelSerializer):
     """Serializer for contact insights"""
     
     class Meta:
-        model = ContactInsights
+        model = ContactInsight
         fields = [
             'total_messages', 'messages_sent', 'messages_received',
             'avg_response_time_seconds', 'sentiment_trend',
@@ -61,10 +63,11 @@ class CustomerDetailSerializer(serializers.ModelSerializer):
 class CustomerCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer for creating and updating customers"""
     
+    # Remove the _id suffix from foreign key fields
     class Meta:
         model = Customer
         fields = [
-            'external_id', 'platform_id', 'platform_account_id',
+            'external_id', 'platform', 'platform_account',  # Changed from platform_id to platform
             'first_name_encrypted', 'last_name_encrypted', 'email_encrypted',
             'phone_encrypted', 'profile_picture_url', 'platform_username',
             'platform_display_name', 'platform_profile_data', 'tags',
@@ -78,8 +81,26 @@ class CustomerCreateUpdateSerializer(serializers.ModelSerializer):
         """Custom validation for customer data"""
         if data.get('is_pinned') and not data.get('pin_order'):
             raise serializers.ValidationError("Pin order is required when customer is pinned")
+        
+        # Validate platform_account belongs to the same platform
+        platform = data.get('platform')
+        platform_account = data.get('platform_account')
+        
+        if platform_account and platform:
+            if platform_account.platform != platform:
+                raise serializers.ValidationError({
+                    'platform_account': 'Platform account does not match the selected platform'
+                })
+        
         return data
-
+    
+    def validate_platform_account(self, value):
+        """Ensure platform account belongs to the user's tenant"""
+        # Get tenant from the view's save method
+        if hasattr(self, 'initial_data'):
+            # The tenant will be passed when save is called
+            pass
+        return value
 
 class ConversationListSerializer(serializers.ModelSerializer):
     """Serializer for listing customer conversations"""

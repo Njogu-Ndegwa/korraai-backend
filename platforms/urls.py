@@ -5,7 +5,7 @@ app_name = 'platforms'
 
 urlpatterns = [
     # List and create platforms
-    path('platforms/', views.platforms, name='platforms'),
+    path('platforms/', views.platforms, name='plat,m forms'),
     
     # Platform detail operations
     path('platforms/<uuid:platform_id>/', views.platform_detail, name='platform-detail'),

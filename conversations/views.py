@@ -15,6 +15,190 @@ from .serializers import (
     MessageCreateSerializer, MessageReadStatusSerializer
 )
 import hashlib
+from rest_framework.decorators import api_view, permission_classes
+from .serializers import ConversationCreateSerializer, ConversationResponseSerializer
+from core.utils import get_tenant_from_user
+from rest_framework.permissions import IsAuthenticated
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_conversation(request):
+    """
+    POST /api/conversations/
+    Create a new conversation
+    """
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
+    
+    # Add tenant to serializer context
+    serializer = ConversationCreateSerializer(
+        data=request.data,
+        context={'tenant': request.user.tenant}
+    )
+    
+    if not serializer.is_valid():
+        return Response(
+            {
+                'success': False,
+                'errors': serializer.errors
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        # Check for duplicate conversation
+        existing_conversation = Conversation.objects.filter(
+            tenant_id=tenant_id,
+            platform=serializer.validated_data['platform'],
+            external_conversation_id=serializer.validated_data['external_conversation_id']
+        ).first()
+        
+        if existing_conversation:
+            # Return existing conversation instead of creating duplicate
+            response_serializer = ConversationResponseSerializer(existing_conversation)
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Conversation already exists',
+                    'conversation': response_serializer.data,
+                    'created': False
+                },
+                status=status.HTTP_200_OK
+            )
+        
+        # Create new conversation
+        conversation = serializer.save()
+        
+        # Set first_message_at if not provided
+        if not conversation.first_message_at:
+            conversation.first_message_at = timezone.now()
+            conversation.save(update_fields=['first_message_at'])
+        
+        # Update customer last contact
+        customer = conversation.customer
+        customer.last_contact_at = timezone.now()
+        customer.save(update_fields=['last_contact_at'])
+        
+        # Prepare response
+        response_serializer = ConversationResponseSerializer(conversation)
+        
+        return Response(
+            {
+                'success': True,
+                'message': 'Conversation created successfully',
+                'conversation': response_serializer.data,
+                'created': True
+            },
+            status=status.HTTP_201_CREATED
+        )
+        
+    except Exception as e:
+        return Response(
+            {
+                'success': False,
+                'message': f'Failed to create conversation: {str(e)}'
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_conversation(request, conversation_id):
+    """
+    GET /api/conversations/{conversation_id}/
+    Get conversation details
+    """
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
+    
+    conversation = get_object_or_404(
+        Conversation,
+        id=conversation_id,
+        tenant_id=tenant_id
+    )
+    
+    serializer = ConversationResponseSerializer(conversation)
+    
+    return Response(
+        {
+            'success': True,
+            'conversation': serializer.data
+        },
+        status=status.HTTP_200_OK
+    )
+
+
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def update_conversation_status(request, conversation_id):
+    """
+    PUT /api/conversations/{conversation_id}/status/
+    Update conversation status
+    """
+    tenant_id, error_response = get_tenant_from_user(request)
+    if error_response:
+        return error_response
+    
+    conversation = get_object_or_404(
+        Conversation,
+        id=conversation_id,
+        tenant_id=tenant_id
+    )
+    
+    new_status = request.data.get('status')
+    if not new_status:
+        return Response(
+            {
+                'success': False,
+                'message': 'Status is required'
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    valid_statuses = ['active', 'pending', 'resolved', 'closed', 'archived']
+    if new_status not in valid_statuses:
+        return Response(
+            {
+                'success': False,
+                'message': f'Invalid status. Must be one of: {", ".join(valid_statuses)}'
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        old_status = conversation.status
+        conversation.status = new_status
+        
+        # Set resolved_at timestamp if resolving
+        if new_status == 'resolved' and old_status != 'resolved':
+            conversation.resolved_at = timezone.now()
+        elif new_status != 'resolved':
+            conversation.resolved_at = None
+        
+        conversation.save()
+        
+        serializer = ConversationResponseSerializer(conversation)
+        
+        return Response(
+            {
+                'success': True,
+                'message': f'Conversation status updated from {old_status} to {new_status}',
+                'conversation': serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+        
+    except Exception as e:
+        return Response(
+            {
+                'success': False,
+                'message': f'Failed to update status: {str(e)}'
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['GET'])

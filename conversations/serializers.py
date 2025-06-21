@@ -4,8 +4,159 @@ from .models import Conversation, Message, MessageReadStatus
 from tenants.models import TenantUser
 from platforms.models import SocialPlatform, TenantPlatformAccount
 from customers.models import Customer
+from leads.models import Lead
+from tenants.models import TenantUser
 
 
+class ConversationCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating conversations"""
+    
+    class Meta:
+        model = Conversation
+        fields = [
+            'id',
+            'customer',
+            'platform',
+            'platform_account',
+            'lead',
+            'external_conversation_id',
+            'conversation_type',
+            'subject',
+            'current_handler_type',
+            'assigned_user',
+            'ai_enabled',
+            'status',
+            'priority',
+            'sentiment_score',
+            'first_message_at',
+            'response_due_at'
+        ]
+        read_only_fields = ['id']
+        
+    def validate_customer(self, value):
+        """Ensure customer belongs to the tenant"""
+        tenant = self.context['tenant']
+        if value.tenant != tenant:
+            raise serializers.ValidationError(
+                "Customer does not belong to your organization"
+            )
+        return value
+    
+    def validate_platform_account(self, value):
+        """Ensure platform account belongs to the tenant"""
+        tenant = self.context['tenant']
+        if value.tenant != tenant:
+            raise serializers.ValidationError(
+                "Platform account does not belong to your organization"
+            )
+        return value
+    
+    def validate_lead(self, value):
+        """Ensure lead belongs to the tenant if provided"""
+        if value:
+            tenant = self.context['tenant']
+            if value.tenant != tenant:
+                raise serializers.ValidationError(
+                    "Lead does not belong to your organization"
+                )
+        return value
+    
+    def validate_assigned_user(self, value):
+        """Ensure assigned user belongs to the tenant if provided"""
+        if value:
+            tenant = self.context['tenant']
+            if value.tenant != tenant:
+                raise serializers.ValidationError(
+                    "User does not belong to your organization"
+                )
+        return value
+    
+    def validate(self, data):
+        """Cross-field validation"""
+        # Ensure platform account matches the platform
+        platform_account = data.get('platform_account')
+        platform = data.get('platform')
+        
+        if platform_account and platform:
+            if platform_account.platform != platform:
+                raise serializers.ValidationError({
+                    'platform_account': 'Platform account does not match the selected platform'
+                })
+        
+        # Set default values if not provided
+        if 'current_handler_type' not in data:
+            data['current_handler_type'] = 'ai' if data.get('ai_enabled', True) else 'human'
+            
+        if 'status' not in data:
+            data['status'] = 'active'
+            
+        if 'priority' not in data:
+            data['priority'] = 'normal'
+            
+        return data
+    
+    def create(self, validated_data):
+        """Create conversation with tenant from context"""
+        validated_data['tenant'] = self.context['tenant']
+        return super().create(validated_data)
+
+
+class ConversationResponseSerializer(serializers.ModelSerializer):
+    """Serializer for conversation responses"""
+    
+    customer_name = serializers.SerializerMethodField()
+    platform_name = serializers.CharField(source='platform.display_name', read_only=True)
+    assigned_user_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Conversation
+        fields = [
+            'id',
+            'customer',
+            'customer_name',
+            'platform',
+            'platform_name',
+            'platform_account',
+            'lead',
+            'external_conversation_id',
+            'conversation_type',
+            'subject',
+            'current_handler_type',
+            'assigned_user',
+            'assigned_user_name',
+            'ai_enabled',
+            'ai_paused_by_user',
+            'ai_paused_at',
+            'ai_pause_reason',
+            'can_ai_resume',
+            'handover_reason',
+            'status',
+            'priority',
+            'sentiment_score',
+            'first_message_at',
+            'last_message_at',
+            'last_human_response_at',
+            'last_ai_response_at',
+            'response_due_at',
+            'resolved_at',
+            'created_at',
+            'updated_at'
+        ]
+    
+    def get_customer_name(self, obj):
+        """Get customer display name"""
+        if obj.customer.platform_display_name:
+            return obj.customer.platform_display_name
+        elif obj.customer.first_name_encrypted or obj.customer.last_name_encrypted:
+            # Note: You'll need to decrypt these in production
+            return f"{obj.customer.first_name_encrypted or ''} {obj.customer.last_name_encrypted or ''}".strip()
+        return obj.customer.platform_username or 'Unknown Customer'
+    
+    def get_assigned_user_name(self, obj):
+        """Get assigned user full name"""
+        if obj.assigned_user:
+            return f"{obj.assigned_user.first_name} {obj.assigned_user.last_name}".strip()
+        return None
 
 class ConversationListSerializer(serializers.ModelSerializer):
     """Serializer for listing conversations with essential info"""

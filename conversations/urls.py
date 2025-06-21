@@ -6,6 +6,7 @@ app_name = 'conversations'
 
 urlpatterns = [
     # Conversation listing and details
+    path('create-conversation', views.create_conversation, name='create_conversation'),
     path('conversations/', views.conversation_list, name='conversation-list'),
     path('conversations/<uuid:conversation_id>/', views.conversation_detail, name='conversation-detail'),
     path('conversations/<uuid:conversation_id>/takeover/', views.conversation_takeover, name='conversation-takeover'),

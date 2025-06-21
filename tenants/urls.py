@@ -1,39 +1,22 @@
 # tenants/urls.py
 from django.urls import path
-from .views import (
-    # Authentication views
-    TenantRegistrationView, LoginView, LogoutView, RefreshTokenView,
-    ForgotPasswordView, ResetPasswordView, VerifyEmailView,
-    
-    # Tenant management views
-    TenantProfileView, TenantSettingsView, TenantAccountDeleteView,
-    
-    # User management views
-    TenantUserListCreateView, TenantUserDetailView, TenantUserRoleUpdateView,
-    TenantUserResendInviteView, TenantUserActivationView
-)
+from . import views
 
 app_name = 'tenants'
 
 urlpatterns = [
+    # Tenant management
+    path('tenants/', views.tenants, name='tenants'),
+    
     # Authentication endpoints
-    path('auth/register/', TenantRegistrationView.as_view(), name='register'),
-    path('auth/login/', LoginView.as_view(), name='login'),
-    path('auth/logout/', LogoutView.as_view(), name='logout'),
-    path('auth/refresh/', RefreshTokenView.as_view(), name='refresh'),
-    path('auth/forgot-password/', ForgotPasswordView.as_view(), name='forgot-password'),
-    path('auth/reset-password/', ResetPasswordView.as_view(), name='reset-password'),
-    path('auth/verify-email/', VerifyEmailView.as_view(), name='verify-email'),
-    
-    # Tenant management endpoints
-    path('tenant/profile/', TenantProfileView.as_view(), name='tenant-profile'),
-    path('tenant/settings/', TenantSettingsView.as_view(), name='tenant-settings'),
-    path('tenant/account/', TenantAccountDeleteView.as_view(), name='tenant-delete'),
-    
-    # User management endpoints
-    path('users/', TenantUserListCreateView.as_view(), name='user-list-create'),
-    path('users/<uuid:pk>/', TenantUserDetailView.as_view(), name='user-detail'),
-    path('users/<uuid:user_id>/role/', TenantUserRoleUpdateView.as_view(), name='user-role-update'),
-    path('users/<uuid:user_id>/resend-invite/', TenantUserResendInviteView.as_view(), name='user-resend-invite'),
-    path('users/<uuid:user_id>/activate/', TenantUserActivationView.as_view(), name='user-activation'),
+    path('auth/register-business/', views.register_business, name='register_business'),
+    path('auth/register-user/', views.register_user, name='register_user'),
+    path('auth/login/', views.login, name='login'),
+    path('auth/logout/', views.logout, name='logout'),
+    path('auth/token/refresh/', views.token_refresh, name='token_refresh'),  # New JWT refresh endpoint
+    path('auth/profile/', views.profile, name='profile'),
+    path('auth/profile/update/', views.update_profile, name='update_profile'),
+    path('auth/change-password/', views.change_password, name='change_password'),
+    path('auth/verify/', views.verify_token, name='verify_token'),
+    path('auth/users/', views.users, name='users'),
 ]
