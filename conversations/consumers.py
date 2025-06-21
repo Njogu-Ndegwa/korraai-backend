@@ -263,7 +263,7 @@ Previous conversation:
     
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding using OpenAI"""
-        client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+
         response = await sync_to_async(client.embeddings.create)(
             model="text-embedding-3-small",
             input=text
@@ -318,9 +318,9 @@ Previous conversation:
         parts = [c["content"] for c in chunks]
         return "\n\n".join(parts)
     
-    async def generate_ai_response(self, question: str, context: str) -> Tuple[str, int]:
-        """Generate response using OpenAI"""
-        client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+    async def generate_ai_response(self, original_question: str, analyzed_question: str, 
+                                  context: str, conversation_history: List[Dict]) -> Tuple[str, int]:
+        """Generate response using LiteLLM with conversation awareness"""
         
         # Build messages with conversation history for better context
         messages = [
