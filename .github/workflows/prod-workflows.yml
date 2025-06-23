@@ -10,82 +10,81 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # Checkout code
-    - name: Checkout code
-      uses: actions/checkout@v3
+      # Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    # Log in to Docker Hub
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
+      # Log in to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-    # Build and push application Docker image (only if Dockerfile exists)
-    - name: Check if Dockerfile exists
-      id: dockerfile_check
-      run: |
-        if [ -f "Dockerfile" ]; then
-          echo "dockerfile_exists=true" >> $GITHUB_OUTPUT
-        else
-          echo "dockerfile_exists=false" >> $GITHUB_OUTPUT
-        fi
+      # Build and push application Docker image (only if Dockerfile exists)
+      - name: Check if Dockerfile exists
+        id: dockerfile_check
+        run: |
+          if [ -f "Dockerfile" ]; then
+            echo "dockerfile_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "dockerfile_exists=false" >> $GITHUB_OUTPUT
+          fi
 
-    - name: Build and push application Docker image to Docker Hub
-      if: steps.dockerfile_check.outputs.dockerfile_exists == 'true'
-      run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/korraai:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/korraai:latest
+      - name: Build and push application Docker image to Docker Hub
+        if: steps.dockerfile_check.outputs.dockerfile_exists == 'true'
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/korraai:latest .
+          docker push ${{ secrets.DOCKER_USERNAME }}/korraai:latest
 
-    # Deploy to AWS EC2
-    - name: Deploy to AWS EC2
-      run: |
-        # Install sshpass if not available
-        sudo apt-get update
-        sudo apt-get install -y sshpass
+      # Deploy to AWS EC2
+      - name: Deploy to AWS EC2
+        run: |
+          # Install sshpass if not available
+          sudo apt-get update
+          sudo apt-get install -y sshpass
 
-        # Copy docker-compose file to EC2
-        sshpass -p "${{ secrets.EC2_PASSWORD }}" scp -o StrictHostKeyChecking=no \
-          docker-compose.yml ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }}:~/
+          # Create deployment script with substituted values
+          cat > deploy-remote.sh << 'SCRIPT'
+          #!/bin/bash
+          set -e
 
-        # SSH into EC2 and deploy
-        sshpass -p "${{ secrets.EC2_PASSWORD }}" ssh -o StrictHostKeyChecking=no \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }} \
-          "export DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} && export OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} && bash -s" << 'EOF'
-
-          # Navigate to home directory where docker-compose.yml was copied
+          # Navigate to home directory
           cd ~
 
           echo "Starting deployment..."
           echo "Current directory: $(pwd)"
           echo "Current user: $(whoami)"
-          echo "User ID: $(id)"
-          echo "DOCKER_USERNAME: ${DOCKER_USERNAME}"
-          echo "OPENAI_API_KEY set: $([ -n "$OPENAI_API_KEY" ] && echo "Yes" || echo "No")"
 
-          # Create .env file for docker-compose
-          echo "Creating .env file..."
-          echo "DOCKER_USERNAME=${DOCKER_USERNAME}" > .env
-          echo "OPENAI_API_KEY=${OPENAI_API_KEY}" >> .env
-          echo "Environment variables in .env:"
-          cat .env
+          # Create .env file with the actual values
+          cat > .env << ENVFILE
+DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+ENVFILE
+
+          echo "Created .env file with environment variables"
           
-          # Check if we're root - if so, no sudo needed
+          # Export variables for this session
+          export DOCKER_USERNAME="${{ secrets.DOCKER_USERNAME }}"
+          export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
+          
+          # Check if we're root
           if [ "$(id -u)" -eq 0 ]; then
             echo "Running as root - no sudo needed"
             
-            # Check Docker daemon status
-            echo "Checking Docker daemon..."
-            systemctl status docker --no-pager -l
-            systemctl start docker
+            # Ensure Docker is running
+            systemctl start docker || true
             
             # Pull the latest application image
             echo "Pulling latest image..."
-            docker pull ${DOCKER_USERNAME}/korraai:latest || echo "Warning: Could not pull latest image"
+            docker pull ${{ secrets.DOCKER_USERNAME }}/korraai:latest || {
+              echo "Error: Failed to pull image"
+              exit 1
+            }
 
-            # Stop existing containers
+            # Stop and remove existing containers
             echo "Stopping existing containers..."
-            docker-compose down || true
+            docker-compose down --remove-orphans || true
 
             # Start services with docker-compose
             echo "Starting services..."
@@ -93,18 +92,22 @@ jobs:
 
             # Wait for containers to start
             echo "Waiting for containers to start..."
-            sleep 15
+            sleep 20
 
             # Check container status
             echo "Container status:"
             docker ps -a
 
-            # Show logs
-            echo "Application logs:"
-            docker-compose logs app --tail=20
+            # Show logs if containers are running
+            if docker ps | grep -q korra-ai; then
+              echo "Application logs:"
+              docker-compose logs app --tail=30
+            fi
 
-            echo "Database logs:"
-            docker-compose logs db --tail=10
+            if docker ps | grep -q django_postgres_pgvector; then
+              echo "Database logs:"
+              docker-compose logs db --tail=10
+            fi
 
             # Clean up unused Docker images
             docker image prune -f
@@ -112,41 +115,28 @@ jobs:
           else
             echo "Not running as root - using sudo"
             
-            # Check Docker daemon status
-            echo "Checking Docker daemon..."
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S systemctl status docker --no-pager -l
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S systemctl start docker
+            # Ensure Docker is running
+            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S systemctl start docker || true
             
             # Pull the latest application image
             echo "Pulling latest image..."
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker pull ${DOCKER_USERNAME}/korraai:latest || echo "Warning: Could not pull latest image"
+            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker pull ${{ secrets.DOCKER_USERNAME }}/korraai:latest || {
+              echo "Error: Failed to pull image"
+              exit 1
+            }
 
-            # Stop existing containers
+            # Stop and remove existing containers
             echo "Stopping existing containers..."
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker-compose down || true
+            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker-compose down --remove-orphans || true
 
             # Start services with docker-compose
             echo "Starting services..."
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker-compose up -d
+            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S -E docker-compose up -d
 
             # Wait for containers to start
             echo "Waiting for containers to start..."
-            sleep 15
+            sleep 20
 
             # Check container status
             echo "Container status:"
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker ps -a
-
-            # Show logs
-            echo "Application logs:"
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker-compose logs app --tail=20
-
-            echo "Database logs:"
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker-compose logs db --tail=10
-
-            # Clean up unused Docker images
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S docker image prune -f
-          fi
-
-          echo "Deployment completed!"
-        EOF
+            echo "${{ secrets.EC2_PASSWORD
