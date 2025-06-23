@@ -14,4 +14,7 @@ urlpatterns = [
     path('conversations/<uuid:conversation_id>/messages/', views.conversation_messages, name='conversation-messages'),
     path('messages/<uuid:message_id>/', views.message_detail, name='message-detail'),
     path('messages/<uuid:message_id>/mark-read/', views.message_mark_read, name='message-mark-read'),
+    path('<uuid:conversation_id>/typing/', views.update_typing_status, name='update_typing_status'),
+    path('<uuid:conversation_id>/assign/', views.assign_conversation, name='assign_conversation'),
+    path('unread-counts/', views.unread_counts, name='unread_counts'),
 ]

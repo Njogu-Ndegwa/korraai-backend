@@ -1,0 +1,73 @@
+name: Deploy to AWS EC2 using Docker Hub
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # Checkout code
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # Log in to Docker Hub
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    # Build and push application Docker image
+    - name: Build and push application Docker image to Docker Hub
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/your-app-name:latest .
+        docker push ${{ secrets.DOCKER_USERNAME }}/your-app-name:latest
+
+    # Deploy to AWS EC2
+    - name: Deploy to AWS EC2
+      run: |
+        # Install sshpass if not available
+        sudo apt-get update
+        sudo apt-get install -y sshpass
+        
+        # Copy docker-compose file to EC2
+        sshpass -p "${{ secrets.EC2_PASSWORD }}" scp -o StrictHostKeyChecking=no \
+          docker-compose.yml ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }}:~/
+        
+        # SSH into EC2 and deploy
+        sshpass -p "${{ secrets.EC2_PASSWORD }}" ssh -o StrictHostKeyChecking=no \
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }} << 'EOF'
+          
+          # Update system and install Docker if not installed
+          if ! command -v docker &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+            sudo usermod -aG docker $USER
+          fi
+          
+          # Install Docker Compose if not installed
+          if ! command -v docker-compose &> /dev/null; then
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+          
+          # Pull the latest application image
+          docker pull ${{ secrets.DOCKER_USERNAME }}/your-app-name:latest
+          
+          # Stop existing containers
+          docker-compose down || true
+          
+          # Start services with docker-compose
+          docker-compose up -d
+          
+          # Clean up unused Docker images to save space
+          docker image prune -f
+        EOF

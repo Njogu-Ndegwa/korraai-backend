@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',  # Add this
     'leads',
     'customers',
-    'conversations',
+    'conversations.apps.ConversationsConfig',
     'platforms',
     'tenants',
     'analytics',
