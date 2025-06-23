@@ -50,33 +50,13 @@ jobs:
 
         # SSH into EC2 and deploy
         sshpass -p "${{ secrets.EC2_PASSWORD }}" ssh -o StrictHostKeyChecking=no \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }} << 'EOF'
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }} << EOF
 
-          # Update system and install Docker if not installed
-          if ! command -v docker &> /dev/null; then
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S apt-get update
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo -S gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-            echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | echo "${{ secrets.EC2_PASSWORD }}" | sudo -S tee /etc/apt/sources.list.d/docker.list > /dev/null
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S apt-get update
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S apt-get install -y docker-ce docker-ce-cli containerd.io
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S usermod -aG docker $USER
-            
-            # Log out and back in to refresh group membership
-            echo "Docker installed. You may need to log out and back in for group changes to take effect."
-          fi
+          # Set environment variables
+          export DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
 
-          # Install Docker Compose if not installed
-          if ! command -v docker-compose &> /dev/null; then
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            echo "${{ secrets.EC2_PASSWORD }}" | sudo -S chmod +x /usr/local/bin/docker-compose
-          fi
-
-          # Wait a moment for Docker to be ready
-          sleep 5
-
-          # Pull the latest application image (if it exists on Docker Hub)
-          docker pull ${{ secrets.DOCKER_USERNAME }}/korraai:latest || echo "Image not found, will use existing or fail"
+          # Pull the latest application image
+          docker pull \${DOCKER_USERNAME}/korraai:latest || echo "Image not found, will use existing or fail"
 
           # Stop existing containers
           docker-compose down || true
@@ -86,4 +66,6 @@ jobs:
 
           # Clean up unused Docker images to save space
           docker image prune -f
+
+          echo "Deployment completed successfully!"
         EOF
