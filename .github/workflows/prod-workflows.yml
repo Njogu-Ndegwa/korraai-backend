@@ -50,22 +50,57 @@ jobs:
 
         # SSH into EC2 and deploy
         sshpass -p "${{ secrets.EC2_PASSWORD }}" ssh -o StrictHostKeyChecking=no \
-          ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }} << EOF
+          ${{ secrets.EC2_USER }}@${{ secrets.EC2_IP }} << 'EOF'
+
+          # Navigate to home directory where docker-compose.yml was copied
+          cd ~
 
           # Set environment variables
           export DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
 
+          echo "Starting deployment..."
+          echo "Current directory: $(pwd)"
+          echo "Files in directory:"
+          ls -la
+
+          # Check if docker-compose.yml exists
+          if [ ! -f "docker-compose.yml" ]; then
+            echo "ERROR: docker-compose.yml not found!"
+            exit 1
+          fi
+
+          echo "Found docker-compose.yml, checking content:"
+          head -10 docker-compose.yml
+
           # Pull the latest application image
-          docker pull \${DOCKER_USERNAME}/korraai:latest || echo "Image not found, will use existing or fail"
+          echo "Pulling latest image..."
+          docker pull ${DOCKER_USERNAME}/korraai:latest || echo "Warning: Could not pull latest image"
 
           # Stop existing containers
+          echo "Stopping existing containers..."
           docker-compose down || true
 
           # Start services with docker-compose
+          echo "Starting services..."
           docker-compose up -d
 
-          # Clean up unused Docker images to save space
+          # Wait for containers to start
+          echo "Waiting for containers to start..."
+          sleep 15
+
+          # Check container status
+          echo "Container status:"
+          docker ps -a
+
+          # Show logs
+          echo "Application logs:"
+          docker-compose logs app --tail=20
+
+          echo "Database logs:"
+          docker-compose logs db --tail=10
+
+          # Clean up unused Docker images
           docker image prune -f
 
-          echo "Deployment completed successfully!"
+          echo "Deployment completed!"
         EOF
