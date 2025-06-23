@@ -60,6 +60,15 @@ jobs:
 
           echo "Starting deployment..."
           echo "Current directory: $(pwd)"
+          echo "Current user: $(whoami)"
+          
+          # Check Docker daemon status
+          echo "Checking Docker daemon..."
+          sudo systemctl status docker --no-pager -l
+
+          # Ensure Docker daemon is running
+          sudo systemctl start docker
+
           echo "Files in directory:"
           ls -la
 
@@ -72,35 +81,35 @@ jobs:
           echo "Found docker-compose.yml, checking content:"
           head -10 docker-compose.yml
 
-          # Pull the latest application image
+          # Pull the latest application image (with sudo)
           echo "Pulling latest image..."
-          docker pull ${DOCKER_USERNAME}/korraai:latest || echo "Warning: Could not pull latest image"
+          sudo docker pull ${DOCKER_USERNAME}/korraai:latest || echo "Warning: Could not pull latest image"
 
-          # Stop existing containers
+          # Stop existing containers (with sudo)
           echo "Stopping existing containers..."
-          docker-compose down || true
+          sudo docker-compose down || true
 
-          # Start services with docker-compose
+          # Start services with docker-compose (with sudo)
           echo "Starting services..."
-          docker-compose up -d
+          sudo docker-compose up -d
 
           # Wait for containers to start
           echo "Waiting for containers to start..."
           sleep 15
 
-          # Check container status
+          # Check container status (with sudo)
           echo "Container status:"
-          docker ps -a
+          sudo docker ps -a
 
-          # Show logs
+          # Show logs (with sudo)
           echo "Application logs:"
-          docker-compose logs app --tail=20
+          sudo docker-compose logs app --tail=20
 
           echo "Database logs:"
-          docker-compose logs db --tail=10
+          sudo docker-compose logs db --tail=10
 
-          # Clean up unused Docker images
-          docker image prune -f
+          # Clean up unused Docker images (with sudo)
+          sudo docker image prune -f
 
           echo "Deployment completed!"
         EOF
