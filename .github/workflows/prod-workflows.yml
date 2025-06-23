@@ -21,11 +21,21 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
 
-    # Build and push application Docker image
-    - name: Build and push application Docker image to Docker Hub
+    # Build and push application Docker image (only if Dockerfile exists)
+    - name: Check if Dockerfile exists
+      id: dockerfile_check
       run: |
-        docker build -t ${{ secrets.DOCKER_USERNAME }}/your-app-name:latest .
-        docker push ${{ secrets.DOCKER_USERNAME }}/your-app-name:latest
+        if [ -f "Dockerfile" ]; then
+          echo "dockerfile_exists=true" >> $GITHUB_OUTPUT
+        else
+          echo "dockerfile_exists=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build and push application Docker image to Docker Hub
+      if: steps.dockerfile_check.outputs.dockerfile_exists == 'true'
+      run: |
+        docker build -t ${{ secrets.DOCKER_USERNAME }}/korraai:latest .
+        docker push ${{ secrets.DOCKER_USERNAME }}/korraai:latest
 
     # Deploy to AWS EC2
     - name: Deploy to AWS EC2
@@ -59,8 +69,8 @@ jobs:
             sudo chmod +x /usr/local/bin/docker-compose
           fi
           
-          # Pull the latest application image
-          docker pull ${{ secrets.DOCKER_USERNAME }}/your-app-name:latest
+          # Pull the latest application image (if it exists on Docker Hub)
+          docker pull ${{ secrets.DOCKER_USERNAME }}/korraai:latest || echo "Image not found, will use existing or fail"
           
           # Stop existing containers
           docker-compose down || true
